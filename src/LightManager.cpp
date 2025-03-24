@@ -32,7 +32,7 @@ void LightManager::handleCommand() {
     int schedule = doc["status"]["schedule"].isNull() ? -1 : doc["status"]["schedule"].as<int>();
 
     if (schedule != -1) {
-        // ✅ Schedule command using millis()
+        // Schedule command
         scheduled = true;
         scheduleTime = millis() + (schedule * 1000);
         targetRoom = roomID;
@@ -95,7 +95,7 @@ void LightManager::checkScheduledCommand() {
             }
         }
 
-        scheduled = false; // ✅ Reset the scheduled flag after execution
+        scheduled = false; //  Reset the scheduled flag 
     }
 }
 
