@@ -10,45 +10,23 @@ private:
     int brightness;
 
 public:
-    LightController(int pin) {
-        this->pin = pin;
-        this->state = false; // false = OFF, true = ON
-        this->brightness = 100;
-        pinMode(pin, OUTPUT);
-        digitalWrite(pin, LOW);
-    }
+    // Constructor
+    LightController(int pin);
 
-    void turnOn() {
-        state = true;
-        digitalWrite(pin, HIGH);
-        Serial.print("Light ");
-        Serial.print(state ? "ON" : "OFF");
-        Serial.print(" at pin ");
-        Serial.println(pin);
-    }
+    // Turns the light on
+    void turnOn();
 
-    void turnOff() {
-        state = false;
-        digitalWrite(pin, LOW);
-        Serial.print("Light ");
-        Serial.print(state ? "ON" : "OFF");
-        Serial.print(" at pin ");
-        Serial.println(pin);
-    }
+    // Turns the light off
+    void turnOff();
 
-    void setBrightness(int value) {
-        brightness = value;
-        analogWrite(pin, map(value, 0, 100, 0, 255));
-        Serial.printf("Brightness set to %d at pin %d\n", brightness, pin);
-    }
+    // Sets brightness (0 - 100)
+    void setBrightness(int value);
 
-    bool getState() {
-        return state;
-    }
+    // Returns the current state (true = ON, false = OFF)
+    bool getState();
 
-    int getBrightness() {
-        return brightness;
-    }
+    // Returns the current brightness level
+    int getBrightness();
 };
 
 #endif
