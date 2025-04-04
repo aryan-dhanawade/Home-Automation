@@ -31,12 +31,12 @@ void LightManager::handleCommand() {
     String mode = doc["status"]["mode"].isNull() ? "" : doc["status"]["mode"].as<String>();
     int schedule = doc["status"]["schedule"].isNull() ? -1 : doc["status"]["schedule"].as<int>();
 
-    if (schedule != -1) {
-        // Schedule command
+    if (schedule != 0) {
         scheduled = true;
         scheduleTime = millis() + (schedule * 1000);
         targetRoom = roomID;
         targetState = state;
+        targetBrightness = brightness;  // Store brightness for scheduled command
         webServer->send(200, "text/plain", "Command scheduled");
         return;
     }
@@ -67,7 +67,9 @@ void LightManager::handleRoom(LightController* light, String state, int brightne
 }
 
 void LightManager::handleMode(String mode) {
+
     if (mode == "party") {
+
         partyModeActive = true;
         partyModeStep = 0;
         lastFlashTime = millis();
@@ -84,36 +86,50 @@ void LightManager::checkScheduledCommand() {
         if (targetRoom == 1) {
             if (targetState == "ON") {
                 bedRoomLight->turnOn();
-            } else if (targetState == "OFF") {
+                if (targetBrightness != -1) { // Apply brightness if provided
+                    bedRoomLight->setBrightness(targetBrightness);
+                }
+            } else {
                 bedRoomLight->turnOff();
             }
         } else if (targetRoom == 2) {
             if (targetState == "ON") {
                 livingRoomLight->turnOn();
-            } else if (targetState == "OFF") {
+                if (targetBrightness != -1) { // Apply brightness if provided
+                    livingRoomLight->setBrightness(targetBrightness);
+                }
+            } else {
                 livingRoomLight->turnOff();
             }
         }
 
-        scheduled = false; //  Reset the scheduled flag 
+        scheduled = false; // Reset the scheduled flag 
     }
 }
+
 
 void LightManager::handlePartyMode() {
     if (partyModeActive) {
         if (millis() - lastFlashTime >= flashInterval) {
             lastFlashTime = millis();
 
+            // Toggle both lights alternatively
             if (partyModeStep % 2 == 0) {
-                livingRoomLight->turnOn();
-            } else {
+                bedRoomLight->turnOn();
                 livingRoomLight->turnOff();
+            } else {
+                bedRoomLight->turnOff();
+                livingRoomLight->turnOn();
             }
 
             partyModeStep++;
+
             if (partyModeStep >= (maxFlashes * 2)) {
                 partyModeActive = false;
                 Serial.println("Party mode finished");
+                // Turn off both lights at the end of party mode
+                bedRoomLight->turnOff();
+                livingRoomLight->turnOff();
             }
         }
     }

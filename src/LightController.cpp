@@ -10,25 +10,20 @@ LightController::LightController(int pin) {
 
 void LightController::turnOn() {
     state = true;
-    digitalWrite(pin, HIGH);
-    Serial.print("Light ");
-    Serial.print(state ? "ON" : "OFF");
-    Serial.print(" at pin ");
-    Serial.println(pin);
+    analogWrite(pin, map(brightness, 0, 100, 0, 255)); // Use stored brightness
+    Serial.printf("Light ON with brightness %d at pin %d\n", brightness, pin);
 }
 
 void LightController::turnOff() {
     state = false;
-    digitalWrite(pin, LOW);
-    Serial.print("Light ");
-    Serial.print(state ? "ON" : "OFF");
-    Serial.print(" at pin ");
-    Serial.println(pin);
+    analogWrite(pin, 0); // Turn off by setting PWM to 0
+    Serial.printf("Light OFF at pin %d\n", pin);
 }
+
 
 void LightController::setBrightness(int value) {
     brightness = value;
-    analogWrite(pin, map(value, 0, 100, 0, 255));
+    analogWrite(pin, map(value, 0, 100, 0, 255) );
     Serial.printf("Brightness set to %d at pin %d\n", brightness, pin);
 }
 

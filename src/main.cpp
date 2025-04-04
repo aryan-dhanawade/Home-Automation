@@ -5,8 +5,8 @@
 #include "LightManager.h"
 
 // WiFi Credentials
-const char* ssid = "Aryan's A55";
-const char* password = "aryan123";
+const char* ssid = "UT-02";
+const char* password = "carlos55";
 
 // Pins
 const int livingRoomPin = D2;
@@ -35,9 +35,23 @@ void setup() {
     Serial.println(WiFi.localIP());
 
     // Setup API endpoint
-    server.on("/command", HTTP_POST, []() {
-        lightManager.handleCommand();
+    server.on("/command", HTTP_OPTIONS, []() {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        server.send(204); // No content response for preflight requests
     });
+    
+    server.on("/command", HTTP_POST, []() {
+        server.sendHeader("Access-Control-Allow-Origin", "*"); // CORS
+        if (server.hasArg("plain")) {
+            lightManager.handleCommand();
+            server.send(200, "text/plain", "Command received");
+        } else {
+            server.send(400, "text/plain", "Bad Request: No JSON Data");
+        }
+    });
+    
 
     server.begin();
     Serial.println("HTTP server started");

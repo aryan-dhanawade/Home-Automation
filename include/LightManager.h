@@ -24,6 +24,7 @@ private:
     int partyModeStep;
     const int maxFlashes = 5;
     const int flashInterval = 500;
+    int targetBrightness;
 
 public:
     LightManager(LightController* bedRoom, LightController* livingRoom, ESP8266WebServer* webServer);
