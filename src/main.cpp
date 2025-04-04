@@ -5,8 +5,8 @@
 #include "LightManager.h"
 
 // WiFi Credentials
-const char* ssid = "UT-02";
-const char* password = "carlos55";
+const char* ssid = "Aryan's A55";
+const char* password = "aryan123";
 
 // Pins
 const int livingRoomPin = D2;
