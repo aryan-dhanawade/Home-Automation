@@ -66,7 +66,7 @@ void LightManager::handleRoom(LightController* light, String state, int brightne
     }
 }
 
-void LightManager::handleMode(String mode) {
+void LightManager::handleMode(LightController* light, String mode) {
 
     if (mode == "party") {
 
@@ -74,7 +74,14 @@ void LightManager::handleMode(String mode) {
         partyModeStep = 0;
         lastFlashTime = millis();
         Serial.println("Party mode activated");
-    } else {
+    
+    } else if(mode == "movie") {
+        light->setBrightness(25);
+        Serial.println("Movie Mode Activated");
+        
+    }
+    
+    else {
         Serial.println("Mode not implemented");
     }
 }
