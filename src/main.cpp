@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "LightController.h"
 #include "LightManager.h"
+#include "UltrasonicSensor.h"
 
 // WiFi Credentials
 const char* ssid = "UT-02";
@@ -11,6 +12,8 @@ const char* password = "carlos55";
 // Pins
 const int livingRoomPin = D2;
 const int bedRoomPin = D1;
+const int trigPin = D5;  // Ultrasonic sensor trigger pin
+const int echoPin = D6;  // Ultrasonic sensor echo pin
 
 // Server
 ESP8266WebServer server(80);
@@ -19,8 +22,11 @@ ESP8266WebServer server(80);
 LightController bedRoomLight(bedRoomPin);
 LightController livingRoomLight(livingRoomPin);
 
+// Ultrasonic Sensor (15cm threshold)
+UltrasonicSensor ultrasonicSensor(trigPin, echoPin, 15.0);
+
 // Manager
-LightManager lightManager(&bedRoomLight, &livingRoomLight, &server);
+LightManager lightManager(&bedRoomLight, &livingRoomLight, &server, &ultrasonicSensor);
 
 void setup() {
     Serial.begin(115200);
@@ -52,7 +58,6 @@ void setup() {
         }
     });
     
-
     server.begin();
     Serial.println("HTTP server started");
 }
@@ -61,4 +66,5 @@ void loop() {
     server.handleClient();
     lightManager.checkScheduledCommand();
     lightManager.handlePartyMode();
+    lightManager.checkUltrasonicSensor();  // Check ultrasonic sensor in each loop
 }

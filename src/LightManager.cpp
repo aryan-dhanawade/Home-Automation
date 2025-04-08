@@ -1,13 +1,43 @@
 #include "LightManager.h"
 
-LightManager::LightManager(LightController* bedRoom, LightController* livingRoom, ESP8266WebServer* webServer) {
+LightManager::LightManager(LightController* bedRoom, LightController* livingRoom, ESP8266WebServer* webServer, UltrasonicSensor* sensor) {
     this->bedRoomLight = bedRoom;
     this->livingRoomLight = livingRoom;
     this->webServer = webServer;
+    this->ultrasonicSensor = sensor;
+    this->motionDetectionEnabled = true;
     scheduled = false;
     partyModeActive = false;
 }
 
+// Add this new method
+void LightManager::checkUltrasonicSensor() {
+    if (!motionDetectionEnabled || !ultrasonicSensor->shouldRead()) {
+        return;
+    }
+    
+    if (ultrasonicSensor->isObjectDetected()) {
+        Serial.println("Object detected within threshold distance!");
+        
+        // Turn on both lights if they're not already on
+        if (!bedRoomLight->getState()) {
+            bedRoomLight->turnOn();
+            Serial.println("Bedroom light turned on by motion detection");
+        }
+        
+        if (!livingRoomLight->getState()) {
+            livingRoomLight->turnOn();
+            Serial.println("Living room light turned on by motion detection");
+        }
+    }
+}
+
+void LightManager::setMotionDetection(bool enabled) {
+    motionDetectionEnabled = enabled;
+    Serial.println(enabled ? "Motion detection enabled" : "Motion detection disabled");
+}
+
+// Modify handleCommand to include motion detection control
 void LightManager::handleCommand() {
     String command = webServer->arg(0);
     if (command.length() == 0) {
@@ -30,13 +60,18 @@ void LightManager::handleCommand() {
     int brightness = doc["status"]["brightness"].isNull() ? -1 : doc["status"]["brightness"].as<int>();
     String mode = doc["status"]["mode"].isNull() ? "" : doc["status"]["mode"].as<String>();
     int schedule = doc["status"]["schedule"].isNull() ? -1 : doc["status"]["schedule"].as<int>();
+    
+    // Add motion detection control
+    bool motionControl = doc["status"]["motionDetection"].isNull() ? 
+                         motionDetectionEnabled : doc["status"]["motionDetection"].as<bool>();
+    setMotionDetection(motionControl);
 
     if (schedule != 0) {
         scheduled = true;
         scheduleTime = millis() + (schedule * 1000);
         targetRoom = roomID;
         targetState = state;
-        targetBrightness = brightness;  // Store brightness for scheduled command
+        targetBrightness = brightness;
         webServer->send(200, "text/plain", "Command scheduled");
         return;
     }
@@ -59,7 +94,7 @@ void LightManager::handleRoom(LightController* light, String state, int brightne
             light->setBrightness(brightness);
         }
         if (mode != "") {
-            handleMode(mode);
+            handleMode(light, mode);
         }
     } else if (state == "OFF") {
         light->turnOff();
