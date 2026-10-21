@@ -3,3 +3,14 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# backend
+backend/.venv/
+backend/.env
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+__pycache__/
+.pytest_cache/
+# firmware secrets
+Secrets.h

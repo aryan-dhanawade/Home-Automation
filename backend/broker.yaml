@@ -1,0 +1,13 @@
+# Local MQTT broker for development, for networks that block public brokers.
+#   pip install amqtt
+#   amqtt -c broker.yaml
+# then set PS_MQTT_HOST=127.0.0.1 in .env. Localhost only, no auth: not for real deployments.
+listeners:
+  default:
+    type: tcp
+    bind: 127.0.0.1:1883
+plugins:
+  amqtt.plugins.authentication.AnonymousAuthPlugin:
+    allow_anonymous: true
+  amqtt.plugins.sys.broker.BrokerSysPlugin:
+    sys_interval: 0

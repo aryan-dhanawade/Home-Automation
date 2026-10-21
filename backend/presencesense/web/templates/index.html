@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PresenceSense</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>PresenceSense</h1>
+        <p class="sub">Occupancy-aware lighting hub · <code>{{ hub_id }}</code></p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pill-hub" title="Hub liveness (retained Last Will + telemetry freshness)">Hub: –</span>
+      <span class="pill" id="pill-broker">Broker: –</span>
+      <span class="pill" id="pill-rest">REST: –</span>
+      <button class="ghost small" id="signout" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="card login-card">
+      <h2>Sign in</h2>
+      <p class="muted">Enter the hub's API token (<code>PS_API_TOKEN</code>). It is kept in this tab's session storage only.</p>
+      <input type="password" id="token-input" placeholder="API token" autocomplete="current-password" required>
+      <button type="submit" class="primary">Unlock dashboard</button>
+      <p class="error" id="login-error" role="alert"></p>
+    </form>
+  </section>
+
+  <main id="app" hidden>
+    <div class="grid">
+      <section class="card state-card" id="state-card">
+        <div class="card-head"><h2>Room state</h2><span class="muted small" id="state-age"></span></div>
+        <div class="state-label" id="state-label">–</div>
+        <p class="state-desc" id="state-desc"></p>
+        <div class="override-banner" id="override-banner" hidden>
+          <span>Automation paused by a manual command.</span>
+          <button class="primary small" data-quick="resume">Resume automation</button>
+        </div>
+        <dl class="readings">
+          <div><dt>Ambient light</dt><dd id="r-ambient">–</dd></div>
+          <div><dt>Range</dt><dd id="r-distance">–</dd></div>
+          <div><dt>Sensor</dt><dd id="r-fault">–</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Lamps</h2></div>
+        <div class="lamp" id="lamp-A">
+          <div class="lamp-row"><span>Lamp A · living room</span><strong class="lamp-val">–</strong></div>
+          <div class="bar"><div class="bar-fill"></div></div>
+        </div>
+        <div class="lamp" id="lamp-B">
+          <div class="lamp-row"><span>Lamp B · bedroom</span><strong class="lamp-val">–</strong></div>
+          <div class="bar"><div class="bar-fill"></div></div>
+        </div>
+        <div class="alerts" id="alerts"></div>
+      </section>
+
+      <section class="card control-card">
+        <div class="card-head">
+          <h2>Control</h2>
+          <div class="seg" role="radiogroup" aria-label="Transport" id="transport">
+            <button type="button" data-value="MQTT" class="on">MQTT</button>
+            <button type="button" data-value="REST">REST</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Target</label>
+          <div class="seg" role="radiogroup" aria-label="Target" id="target">
+            <button type="button" data-value="all" class="on">Both</button>
+            <button type="button" data-value="lampA">Lamp A</button>
+            <button type="button" data-value="lampB">Lamp B</button>
+          </div>
+        </div>
+        <div class="field row">
+          <button class="primary" data-cmd="on">On</button>
+          <button data-cmd="off">Off</button>
+          <button class="ghost" data-cmd="resume" title="Release the override and hand control back to automation">Resume automation</button>
+        </div>
+        <div class="field">
+          <label for="brightness">Brightness <span class="muted" id="brightness-val">128</span></label>
+          <div class="row">
+            <input type="range" id="brightness" min="0" max="255" value="128">
+            <button data-cmd="brightness">Set</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="scene">Scene</label>
+          <div class="row">
+            <select id="scene"></select>
+            <button data-cmd="scene">Apply</button>
+          </div>
+        </div>
+        <details class="field" id="schedule-box">
+          <summary>Schedule instead of sending now</summary>
+          <div class="row">
+            <input type="datetime-local" id="schedule-at">
+            <label class="check"><input type="checkbox" id="schedule-on"> schedule</label>
+          </div>
+          <ul class="schedules" id="schedules"></ul>
+        </details>
+        <p class="cmd-result" id="cmd-result" aria-live="polite"></p>
+      </section>
+
+      <section class="card wide">
+        <div class="card-head">
+          <h2>History</h2>
+          <div class="seg" id="history-span">
+            <button type="button" data-value="15">15 m</button>
+            <button type="button" data-value="60" class="on">1 h</button>
+            <button type="button" data-value="360">6 h</button>
+            <button type="button" data-value="1440">24 h</button>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="sw a"></i>Lamp A</span><span><i class="sw b"></i>Lamp B</span>
+          <span><i class="sw amb"></i>Ambient (LDR)</span>
+          <span class="states" id="state-legend"></span>
+        </div>
+        <svg id="chart" viewBox="0 0 800 240" role="img" aria-label="Lamp brightness and ambient light over time"></svg>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Energy</h2>
+          <select id="energy-window" aria-label="Report window">
+            <option value="30">Last 30 min</option>
+            <option value="60" selected>Last hour</option>
+            <option value="1440">Last 24 h</option>
+            <option value="10080">Last 7 days</option>
+          </select>
+        </div>
+        <div class="big-number"><span id="e-saved">–</span><small id="e-saved-pct"></small></div>
+        <p class="muted small">Net saving vs. always-on, after the hub's own draw. Modelled, not measured.</p>
+        <table class="table" id="energy-table"></table>
+        <ul class="warnings" id="energy-warnings"></ul>
+        <button class="ghost small" id="energy-download">Download report (.md)</button>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Evaluation metrics</h2>
+          <select id="metrics-window" aria-label="Metrics window">
+            <option value="60">Last hour</option>
+            <option value="1440" selected>Last 24 h</option>
+            <option value="10080">Last 7 days</option>
+          </select>
+        </div>
+        <div class="metrics" id="metrics"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Events</h2><span class="muted small">sequence-numbered</span></div>
+        <ol class="list" id="events"></ol>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Commands</h2><span class="muted small">round-trip from ack</span></div>
+        <ol class="list" id="commands"></ol>
+      </section>
+    </div>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
