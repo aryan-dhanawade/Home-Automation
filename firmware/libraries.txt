@@ -1,0 +1,4 @@
+# Wokwi library manager (web editor). Same as lib_deps in platformio.ini.
+PubSubClient
+ArduinoJson
+LiquidCrystal I2C

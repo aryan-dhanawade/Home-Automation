@@ -18,7 +18,8 @@ def test_valid_telemetry_normalised():
         {"state": "VACANT", "lampA": 256, "lampB": 0, "ambient": 0, "uptime": 0},
         {"state": "VACANT", "lampA": True, "lampB": 0, "ambient": 0, "uptime": 0},
         {"state": "VACANT", "lampA": "1", "lampB": 0, "ambient": 0, "uptime": 0},
-        {"state": "VACANT", "lampA": 0, "lampB": 0, "ambient": 2000, "uptime": 0},
+        {"state": "VACANT", "lampA": 0, "lampB": 0, "ambient": 5000, "uptime": 0},
+        {"state": "VACANT", "lampA": 0, "lampB": 0, "ambient": 0, "uptime": 0, "lux": -3},
         {"state": "VACANT", "lampA": 0, "lampB": 0, "ambient": 0},
         {"state": "VACANT", "lampA": 0, "lampB": 0, "ambient": 0, "uptime": 0, "fault": "yes"},
     ],
@@ -43,6 +44,12 @@ def test_ack_and_status():
         protocol.validate_ack({"result": "MAYBE", "correlationId": "c1"})
     with pytest.raises(PayloadError):
         protocol.validate_ack({"result": "OK", "correlationId": "x" * 24})
+    full = protocol.validate_ack(
+        {"result": "OK", "correlationId": "b1", "type": "on", "target": "lampA", "value": 255, "source": "BUTTON"}
+    )
+    assert (full["type"], full["target"], full["value"], full["source"]) == ("on", "lampA", 255, "BUTTON")
+    with pytest.raises(PayloadError):
+        protocol.validate_ack({"result": "OK", "correlationId": "b1", "source": "PIGEON"})
     assert protocol.validate_status(b"online") is True
     assert protocol.validate_status(b"offline") is False
     with pytest.raises(PayloadError):

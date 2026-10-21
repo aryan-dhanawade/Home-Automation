@@ -1,0 +1,5 @@
+# For Wokwi for VS Code (paid plan): simulate the PlatformIO build with diagram.json.
+[wokwi]
+version = 1
+firmware = '.pio/build/esp32dev/firmware.bin'
+elf = '.pio/build/esp32dev/firmware.elf'

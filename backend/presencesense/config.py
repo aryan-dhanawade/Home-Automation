@@ -37,12 +37,16 @@ def _env_bool(name, default=False):
 class Settings:
     hub_id: str = "hub01"
 
-    mqtt_host: str = "test.mosquitto.org"
-    mqtt_port: int = 1883
-    mqtt_tls: bool = False
+    # Default: shiftr.io's public broker over WebSocket + TLS on 443, which gets
+    # through networks that block 1883/8883. The hub uses plain MQTT to the same host.
+    mqtt_host: str = "public.cloud.shiftr.io"
+    mqtt_port: int = 443
+    mqtt_transport: str = "websockets"  # or "tcp"
+    mqtt_ws_path: str = "/"
+    mqtt_tls: bool = True
     mqtt_ca_file: str = ""
-    mqtt_username: str = ""
-    mqtt_password: str = ""
+    mqtt_username: str = "public"
+    mqtt_password: str = "public"
     mqtt_client_id: str = "presencesense-backend"
 
     # Shared bearer token: the dashboard must present it, and it is embedded in
@@ -83,14 +87,24 @@ class Settings:
 
     @classmethod
     def from_env(cls):
+        # Unset broker options follow from the host and port, so a .env that only
+        # says PS_MQTT_HOST=127.0.0.1 still means plain MQTT on 1883.
+        host = _env("PS_MQTT_HOST") or cls.mqtt_host
+        shiftr = host == cls.mqtt_host
+        port = int(_env("PS_MQTT_PORT") or (443 if shiftr else 1883))
+        transport = _env("PS_MQTT_TRANSPORT") or ("websockets" if port == 443 else "tcp")
+        if transport not in ("tcp", "websockets"):
+            raise ValueError("PS_MQTT_TRANSPORT must be 'tcp' or 'websockets'")
         return cls(
             hub_id=_env("PS_HUB_ID", cls.hub_id),
-            mqtt_host=_env("PS_MQTT_HOST", cls.mqtt_host),
-            mqtt_port=int(_env("PS_MQTT_PORT", "8883" if _env_bool("PS_MQTT_TLS") else "1883")),
-            mqtt_tls=_env_bool("PS_MQTT_TLS"),
+            mqtt_host=host,
+            mqtt_port=port,
+            mqtt_transport=transport,
+            mqtt_ws_path=_env("PS_MQTT_WS_PATH") or cls.mqtt_ws_path,
+            mqtt_tls=_env_bool("PS_MQTT_TLS", default=port in (443, 8883)),
             mqtt_ca_file=_env("PS_MQTT_CA_FILE"),
-            mqtt_username=_env("PS_MQTT_USERNAME"),
-            mqtt_password=_env("PS_MQTT_PASSWORD"),
+            mqtt_username=_env("PS_MQTT_USERNAME") or ("public" if shiftr else ""),
+            mqtt_password=_env("PS_MQTT_PASSWORD") or ("public" if shiftr else ""),
             mqtt_client_id=_env("PS_MQTT_CLIENT_ID", cls.mqtt_client_id),
             api_token=_env("PS_API_TOKEN"),
             device_url=_env("PS_DEVICE_URL").rstrip("/"),

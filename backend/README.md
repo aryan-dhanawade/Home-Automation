@@ -53,19 +53,36 @@ transport. Other simulator options: `--scenario box` (an object parked in the
 beam, which trips the stuck-state rule after `PS_STUCK_WINDOW_S`) and
 `--drop-events 0.1` (drops 10 % of events, to exercise gap detection).
 
-### Network blocks MQTT? Run a local broker
+### Broker and networks that block MQTT
 
-If the dashboard shows **Broker: disconnected**, your network is probably
-blocking outbound MQTT (common on college networks). Run a broker on your PC:
+By default the backend talks to shiftr.io's public broker
+(`public.cloud.shiftr.io`) over MQTT-over-WebSocket with TLS on **port 443**,
+which gets through networks that block MQTT's ports 1883/8883. The Wokwi hub
+reaches the same broker on 1883 from Wokwi's cloud. Check any network first:
+
+```bash
+.venv/Scripts/python -m presencesense netcheck
+```
+
+It reports which ports are open, then does a real publish/subscribe round
+trip, a retained message and a Last Will. On a public broker, `serve` and `sim`
+refuse to start unless `PS_HUB_ID` is random (`ps-` + 16 hex characters).
+
+Offline alternative (simulator only; the Wokwi hub cannot reach your PC on
+Wokwi's free gateway):
 
 ```bash
 .venv/Scripts/python -m pip install amqtt
 .venv/Scripts/amqtt -c broker.yaml
 ```
 
-and set `PS_MQTT_HOST=127.0.0.1` in `.env`. This works with the simulator, but
-the Wokwi hub runs in Wokwi's cloud and can only reach a public broker. For that,
-use a network that allows port 1883 (e.g. a phone hotspot).
+and set `PS_MQTT_HOST=127.0.0.1` in `.env` (port 1883, plain TCP, no TLS follow
+automatically).
+
+### The real hub in Wokwi
+
+See [../firmware/README.md](../firmware/README.md). Same `PS_HUB_ID` and
+`PS_API_TOKEN` go into the firmware's `Secrets.h`.
 
 ## Reports and maintenance
 

@@ -7,7 +7,7 @@ const TOKEN_KEY = "ps-token";
 const STATES = {
   VACANT: { color: "var(--st-vacant)", desc: "Nobody in range. Lamps off." },
   OCCUPIED: { color: "var(--st-occupied)", desc: "Presence confirmed (3 consecutive in-range samples). Lamps on." },
-  OCCUPIED_DAYLIGHT: { color: "var(--st-daylight)", desc: "Occupied, but daylight is sufficient (LDR inhibit). Lamps held off." },
+  OCCUPIED_DAYLIGHT: { color: "var(--st-daylight)", desc: "Occupied, but daylight is sufficient (LDR inhibit above the lux threshold). Lamps held off." },
   GRACE: { color: "var(--st-grace)", desc: "Presence lost. Holding the lamps for the 6 s grace period." },
   OVERRIDE: { color: "var(--st-override)", desc: "A manual command is in force. Automation will not touch the lamps until resumed." },
 };
@@ -17,6 +17,7 @@ try { token = sessionStorage.getItem(TOKEN_KEY) || ""; } catch (_) { /* storage 
 let pollTimer = null;
 let slowTimer = null;
 let historyMinutes = 60;
+let daylightLux = { on: 500, off: 300 };  // replaced by the hub's thresholds from /api/snapshot
 
 // --- helpers ---------------------------------------------------------------
 
@@ -111,6 +112,7 @@ function renderSnapshot(s) {
   setPill("pill-rest", "REST", s.rest_enabled ? "enabled" : "off", s.rest_enabled ? "good" : "");
   $("#transport button[data-value=REST]").disabled = !s.rest_enabled;
 
+  if (s.daylight_lux) daylightLux = s.daylight_lux;
   const t = s.telemetry;
   const state = t ? t.state : null;
   const info = STATES[state] || { color: "var(--muted)", desc: "No telemetry received yet." };
@@ -121,8 +123,12 @@ function renderSnapshot(s) {
   $("#override-banner").hidden = state !== "OVERRIDE";
 
   if (t) {
-    const daylight = t.ambient_raw >= 600 ? "bright" : t.ambient_raw < 450 ? "dark" : "between";
-    $("#r-ambient").textContent = `${t.ambient_raw} (${daylight})`;
+    if (t.lux == null) {
+      $("#r-ambient").textContent = `raw ${t.ambient_raw}`;
+    } else {
+      const daylight = t.lux >= daylightLux.on ? "daylight" : t.lux < daylightLux.off ? "dark" : "between";
+      $("#r-ambient").textContent = `${Math.round(t.lux)} lux (${daylight})`;
+    }
     $("#r-distance").textContent = t.distance_cm == null ? "n/a" : t.distance_cm < 0 ? "no echo" : `${Math.round(t.distance_cm)} cm`;
     $("#r-fault").textContent = t.fault ? "FAULT" : t.fault === 0 ? "OK" : "n/a";
     for (const [id, v] of [["A", t.brightness_a], ["B", t.brightness_b]]) {
@@ -156,7 +162,7 @@ function renderSnapshot(s) {
         : el("span", { class: "res-wait" }, "no ack");
       const rtt = c.rtt_ms != null ? ` · ${Math.round(c.rtt_ms)} ms` : "";
       return el("li", {},
-        el("span", {}, `${what}${extra}`, el("span", { class: "muted" }, ` via ${c.source}${c.origin === "schedule" ? " (scheduled)" : ""}`)),
+        el("span", {}, `${what}${extra}`, el("span", { class: "muted" }, c.source === "BUTTON" ? " via wall button on the hub" : ` via ${c.source}${c.origin === "schedule" ? " (scheduled)" : ""}`)),
         el("span", {}, res, rtt));
     })
   );
@@ -190,7 +196,8 @@ function renderChart(points) {
   const x0 = now - historyMinutes * 60;
   const x = (ts) => L + ((ts - x0) / (now - x0)) * (R - L);
   const yLamp = (v) => B1 - (v / 255) * (B1 - T1);
-  const yAmb = (v) => B2 - (v / 1023) * (B2 - T2);
+  // Light spans 1 to 100 000 lux, so it is drawn on a log scale.
+  const yAmb = (lux) => B2 - (Math.log10(Math.min(Math.max(lux, 1), 1e5)) / 5) * (B2 - T2);
 
   for (const v of [0, 128, 255]) {
     svg.append(mk("line", { x1: L, x2: R, y1: yLamp(v), y2: yLamp(v), class: "grid-line" }));
@@ -199,9 +206,9 @@ function renderChart(points) {
     svg.append(t);
   }
   svg.append(mk("line", { x1: L, x2: R, y1: B2, y2: B2, class: "grid-line" }));
-  for (const v of [600, 450]) svg.append(mk("line", { x1: L, x2: R, y1: yAmb(v), y2: yAmb(v), class: "thr" }));
-  const ambLabel = mk("text", { x: L - 6, y: yAmb(600) + 4, "text-anchor": "end", class: "axis" });
-  ambLabel.textContent = "LDR";
+  for (const v of [daylightLux.on, daylightLux.off]) svg.append(mk("line", { x1: L, x2: R, y1: yAmb(v), y2: yAmb(v), class: "thr" }));
+  const ambLabel = mk("text", { x: L - 6, y: yAmb(daylightLux.on) + 4, "text-anchor": "end", class: "axis" });
+  ambLabel.textContent = "lux";
   svg.append(ambLabel);
   for (let i = 0; i <= 4; i++) {
     const ts = x0 + (i / 4) * (now - x0);
@@ -236,7 +243,7 @@ function renderChart(points) {
     });
     return d + `H${x(Math.min(now, points[points.length - 1][0] + 5))}`;
   };
-  const line = (idx) => points.map((p, i) => `${i ? "L" : "M"}${x(p[0])},${yAmb(p[idx])}`).join("");
+  const line = (idx) => points.filter((p) => p[idx] != null).map((p, i) => `${i ? "L" : "M"}${x(p[0])},${yAmb(p[idx])}`).join("");
   svg.append(mk("path", { d: line(3), fill: "none", stroke: "var(--ambient)", "stroke-width": 1.5 }));
   svg.append(mk("path", { d: step(2, yLamp), fill: "none", stroke: "var(--lamp-b)", "stroke-width": 2, "stroke-dasharray": "5 3" }));
   svg.append(mk("path", { d: step(1, yLamp), fill: "none", stroke: "var(--lamp-a)", "stroke-width": 2 }));

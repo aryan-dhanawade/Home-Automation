@@ -17,41 +17,50 @@ import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import paho.mqtt.client as mqtt
-
 from . import protocol
+from .broker import make_client
 
 log = logging.getLogger("presencesense.sim")
 
 # Same values as firmware Config.h
 PRESENCE_RANGE_CM = 150
 RANGE_POLL_S = 0.08
-LDR_INHIBIT_ON = 600
-LDR_INHIBIT_OFF = 450
 GRACE_PERIOD_S = 6.0
+# Wokwi photoresistor module: 10 kOhm series resistor, LDR gamma 0.7, 50 kOhm at 10 lux.
+LDR_GAMMA = 0.7
+LDR_RL10_KOHM = 50
+ADC_VREF = 3.3
 TELEMETRY_PERIOD_S = 5.0
 
 FAR_CM = 400.0
 
 
+def lux_to_adc(lux):
+    """The raw 12-bit reading the Wokwi LDR module gives at this illuminance.
+    More light -> lower LDR resistance -> lower voltage -> lower reading."""
+    resistance = LDR_RL10_KOHM * 1e3 * 10**LDR_GAMMA / max(lux, 0.01) ** LDR_GAMMA
+    volts = ADC_VREF * resistance / (resistance + 10_000)
+    return round(volts / ADC_VREF * protocol.ADC_MAX)
+
+
 def cycle_scenario(t):
-    """(distance_cm, ambient_raw) at time t of a 120 s loop covering every state."""
+    """(distance_cm, lux) at time t of a 120 s loop covering every state."""
     t %= 120
-    ambient = 300
+    lux = 80 * random.uniform(0.95, 1.05)
     if 60 <= t < 90:
-        ambient = 750  # daylight
+        lux = 900 * random.uniform(0.97, 1.03)  # daylight
     if 15 <= t < 45 or 70 <= t < 100:
-        return 85 + random.uniform(-8, 8), ambient + random.randint(-10, 10)
+        return 85 + random.uniform(-8, 8), lux
     if 55 <= t < 55.1:
-        return 60.0, ambient  # single-sample jolt: must not trigger
+        return 60.0, lux  # single-sample jolt: must not trigger
     if 110 <= t < 112:
-        return -1.0, ambient  # echo timeout
-    return FAR_CM, ambient + random.randint(-10, 10)
+        return -1.0, lux  # echo timeout
+    return FAR_CM, lux
 
 
 def box_scenario(t):
     """A box parked 70 cm in front of the sensor: occupied forever, zero variance."""
-    return 70.0, 300
+    return 70.0, 80.0
 
 
 SCENARIOS = {"cycle": cycle_scenario, "box": box_scenario}
@@ -67,7 +76,7 @@ class SimulatedHub:
 
         self.window = deque(maxlen=3)
         self.distance = 0.0
-        self.ambient = 0
+        self.lux = 0.0
         self.daylight = False
         self.auto_state = "VACANT"
         self.grace_started = 0.0
@@ -76,17 +85,13 @@ class SimulatedHub:
         self.seq = 0
         self.last_reported_state = None
 
-        self.client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, client_id=f"ps-sim-{settings.hub_id}-{random.randrange(1 << 16):04x}"
+        self.client = make_client(
+            settings,
+            f"ps-sim-{settings.hub_id}-{random.randrange(1 << 16):04x}",
+            will=(settings.topic("status"), "offline", 1, True),
         )
-        if settings.mqtt_username:
-            self.client.username_pw_set(settings.mqtt_username, settings.mqtt_password or None)
-        if settings.mqtt_tls:
-            self.client.tls_set(ca_certs=settings.mqtt_ca_file or None)
-        self.client.will_set(settings.topic("status"), "offline", qos=1, retain=True)
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
-        self.client.reconnect_delay_set(1, 30)
 
     def uptime_ms(self):
         return int((time.monotonic() - self.started) * 1000)
@@ -98,13 +103,13 @@ class SimulatedHub:
     # --- OccupancyEngine ---------------------------------------------------------
 
     def update(self, t):
-        distance, ambient = self.scenario(t)
+        distance, lux = self.scenario(t)
         self.distance = distance
         self.window.append(0 < distance <= PRESENCE_RANGE_CM)
-        self.ambient = max(0, min(protocol.ADC_MAX, ambient))
-        if self.ambient >= LDR_INHIBIT_ON:
+        self.lux = lux
+        if lux >= protocol.LUX_DAYLIGHT_ON:
             self.daylight = True
-        elif self.ambient < LDR_INHIBIT_OFF:
+        elif lux < protocol.LUX_DAYLIGHT_OFF:
             self.daylight = False
 
         if self.override:
@@ -128,15 +133,16 @@ class SimulatedHub:
     # --- CommandRouter (shared by both transports) -----------------------------------
 
     def handle_command(self, cmd, source):
+        """Returns the ack object, as the firmware's CommandRouter builds it."""
         cid = cmd.get("correlationId") if isinstance(cmd.get("correlationId"), str) else ""
-        cid = cid[: protocol.CORRELATION_ID_MAX]
+        ack = {"result": "OK", "correlationId": cid[: protocol.CORRELATION_ID_MAX], "source": source}
         token = cmd.get("token") if isinstance(cmd.get("token"), str) else ""
         if not hmac.compare_digest(token.encode(), self.settings.api_token.encode()):
             log.warning("[%s] command rejected: bad token", source)
-            return "AUTH_FAIL", cid
+            return {**ack, "result": "AUTH_FAIL"}
         ctype, target, value = cmd.get("type"), cmd.get("target"), cmd.get("value")
         if ctype not in protocol.COMMAND_TYPES or (ctype != "resume" and target not in protocol.TARGETS):
-            return "BAD_REQUEST", cid
+            return {**ack, "result": "BAD_REQUEST"}
         with self.lock:
             if ctype == "resume":
                 self.override = False
@@ -148,12 +154,14 @@ class SimulatedHub:
                 elif isinstance(value, int) and not isinstance(value, bool):
                     level = max(0, min(255, value))
                 else:
-                    return "BAD_REQUEST", cid
+                    return {**ack, "result": "BAD_REQUEST"}
                 self.override = True
                 for lamp in ("lampA", "lampB") if target == "all" else (target,):
                     self.lamps[lamp] = level
         log.info("[%s] %s %s %s -> OK", source, ctype, target, value)
-        return "OK", cid
+        if ctype == "resume":
+            return {**ack, "type": "resume", "target": "all", "value": 0}
+        return {**ack, "type": ctype, "target": target, "value": level}
 
     # --- MQTT ----------------------------------------------------------------------
 
@@ -172,10 +180,7 @@ class SimulatedHub:
                 raise ValueError
         except ValueError:
             return
-        result, cid = self.handle_command(cmd, "MQTT")
-        client.publish(
-            self.settings.topic("ack"), json.dumps({"result": result, "correlationId": cid}), qos=1
-        )
+        self.publish_json("ack", self.handle_command(cmd, "MQTT"), qos=1)
 
     def publish_json(self, leaf, obj, qos=0):
         self.client.publish(self.settings.topic(leaf), json.dumps(obj, separators=(",", ":")), qos=qos)
@@ -185,7 +190,8 @@ class SimulatedHub:
             "state": self.state,
             "lampA": self.lamps["lampA"],
             "lampB": self.lamps["lampB"],
-            "ambient": self.ambient,
+            "ambient": lux_to_adc(self.lux),
+            "lux": round(self.lux, 1),
             "distance": round(self.distance, 1),
             "fault": self.distance < 0,
             "uptime": self.uptime_ms(),
@@ -224,9 +230,9 @@ class SimulatedHub:
                         raise ValueError
                 except ValueError:
                     return self._send(400, {"result": "BAD_REQUEST", "correlationId": ""})
-                result, cid = hub.handle_command(cmd, "REST")
-                code = {"OK": 200, "AUTH_FAIL": 401}.get(result, 400)
-                self._send(code, {"result": result, "correlationId": cid})
+                ack = hub.handle_command(cmd, "REST")
+                hub.publish_json("ack", ack, qos=1)  # the MQTT side sees every command too
+                self._send({"OK": 200, "AUTH_FAIL": 401}.get(ack["result"], 400), ack)
 
             def log_message(self, fmt, *args):
                 pass

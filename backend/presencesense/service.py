@@ -7,6 +7,7 @@ and everything is testable without a broker.
 
 import json
 import logging
+import secrets
 import statistics
 import threading
 import time
@@ -14,9 +15,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
-import paho.mqtt.client as mqtt
-
 from . import protocol
+from .broker import make_client
 from .db import Database
 from .energy import compute_report
 from .protocol import PayloadError
@@ -78,21 +78,18 @@ class HubService:
 
     def start_mqtt(self):
         s = self.settings
-        client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, client_id=s.mqtt_client_id, clean_session=True
-        )
-        if s.mqtt_username:
-            client.username_pw_set(s.mqtt_username, s.mqtt_password or None)
-        if s.mqtt_tls:
-            client.tls_set(ca_certs=s.mqtt_ca_file or None)
+        # A random suffix: two backends with the same client id on a public
+        # broker would keep kicking each other off.
+        client = make_client(s, f"{s.mqtt_client_id}-{secrets.token_hex(3)}")
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
-        client.reconnect_delay_set(min_delay=1, max_delay=30)
         client.connect_async(s.mqtt_host, s.mqtt_port, keepalive=30)
         client.loop_start()
         self._client = client
-        log.info("MQTT connecting to %s:%s (tls=%s)", s.mqtt_host, s.mqtt_port, s.mqtt_tls)
+        log.info(
+            "MQTT connecting to %s:%s (%s, tls=%s)", s.mqtt_host, s.mqtt_port, s.mqtt_transport, s.mqtt_tls
+        )
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:
@@ -185,10 +182,15 @@ class HubService:
         a = protocol.validate_ack(protocol.parse_json(payload))
         row = self.db.ack_command(a["correlationId"], a["result"], now)
         if row is None:
-            # Someone commanded the hub directly over MQTT; log it so the audit trail is complete.
-            self.db.insert_command(a["correlationId"], None, None, None, None, "MQTT", "external", None)
+            # A command the backend did not send: the hub's wall button, or someone
+            # commanding the hub directly. Log it so the audit trail is complete.
+            source = a["source"] or "MQTT"
+            origin = "hub" if source == "BUTTON" else "external"
+            self.db.insert_command(
+                a["correlationId"], a["type"], a["target"], a["value"], None, source, origin, None
+            )
             row = self.db.ack_command(a["correlationId"], a["result"], now)
-        elif row["result"] == "OK" and row["cmd_type"]:
+        if row["result"] == "OK" and row["cmd_type"]:
             self._audit.on_ack(row["cmd_type"], row["target"], row["value"])
         waiter = self._waiters.get(a["correlationId"])
         if waiter:
@@ -360,6 +362,7 @@ class HubService:
             "alerts": self.db.recent_alerts(self.device_id),
             "schedules": self.db.pending_schedules(),
             "scenes": protocol.SCENES,
+            "daylight_lux": {"on": protocol.LUX_DAYLIGHT_ON, "off": protocol.LUX_DAYLIGHT_OFF},
         }
 
     def history(self, minutes, max_points=720):
@@ -367,7 +370,7 @@ class HubService:
         rows = self.db.telemetry_between(self.device_id, now - minutes * 60, now)
         stride = max(1, len(rows) // max_points)
         return [
-            [r["server_ts"], r["brightness_a"], r["brightness_b"], r["ambient_raw"], r["state"]]
+            [r["server_ts"], r["brightness_a"], r["brightness_b"], r["lux"], r["state"]]
             for r in rows[::stride]
         ]
 

@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "author": "PresenceSense",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    {
+      "type": "wokwi-hc-sr04",
+      "id": "sonar",
+      "top": -180,
+      "left": -40,
+      "attrs": { "distance": "400" }
+    },
+    {
+      "type": "wokwi-photoresistor-sensor",
+      "id": "ldr",
+      "top": -60,
+      "left": 220,
+      "attrs": { "lux": "80" }
+    },
+    {
+      "type": "wokwi-lcd1602",
+      "id": "lcd",
+      "top": 250,
+      "left": 140,
+      "attrs": { "pins": "i2c" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "lampA",
+      "top": 60,
+      "left": 260,
+      "attrs": { "color": "yellow", "label": "Lamp A" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "lampB",
+      "top": 60,
+      "left": 330,
+      "attrs": { "color": "white", "label": "Lamp B" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rA",
+      "top": 150,
+      "left": 230,
+      "rotate": 90,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rB",
+      "top": 150,
+      "left": 300,
+      "rotate": 90,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": 40,
+      "left": -170,
+      "attrs": { "volume": "0.2" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "wallSwitch",
+      "top": 170,
+      "left": -190,
+      "attrs": { "color": "blue", "label": "Wall switch (B)", "key": "b" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "sonar:VCC", "esp:5V", "red", [] ],
+    [ "sonar:GND", "esp:GND.1", "black", [] ],
+    [ "sonar:TRIG", "esp:5", "orange", [] ],
+    [ "sonar:ECHO", "esp:18", "purple", [] ],
+
+    [ "ldr:VCC", "esp:3V3", "red", [] ],
+    [ "ldr:GND", "esp:GND.2", "black", [] ],
+    [ "ldr:AO", "esp:34", "green", [] ],
+
+    [ "lcd:VCC", "esp:5V", "red", [] ],
+    [ "lcd:GND", "esp:GND.2", "black", [] ],
+    [ "lcd:SDA", "esp:21", "blue", [] ],
+    [ "lcd:SCL", "esp:22", "gold", [] ],
+
+    [ "esp:25", "rA:1", "yellow", [] ],
+    [ "rA:2", "lampA:A", "yellow", [] ],
+    [ "lampA:C", "esp:GND.2", "black", [] ],
+    [ "esp:26", "rB:1", "white", [] ],
+    [ "rB:2", "lampB:A", "white", [] ],
+    [ "lampB:C", "esp:GND.2", "black", [] ],
+
+    [ "buzzer:2", "esp:27", "magenta", [] ],
+    [ "buzzer:1", "esp:GND.1", "black", [] ],
+
+    [ "wallSwitch:1.r", "esp:4", "cyan", [] ],
+    [ "wallSwitch:2.r", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}

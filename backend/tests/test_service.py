@@ -125,6 +125,29 @@ def test_external_ack_logged(service):
     assert row["origin"] == "external" and row["result"] == "OK"
 
 
+def test_wall_button_is_logged_and_audited(service):
+    button_on = {"result": "OK", "correlationId": "b42", "type": "on", "target": "all",
+                 "value": 255, "source": "BUTTON"}
+    service.ingest(topic(service, "ack"), json.dumps(button_on).encode())
+    row = service.db.get_command("b42")
+    assert (row["origin"], row["source"], row["cmd_type"]) == ("hub", "BUTTON", "on")
+    # The button is a human command too: automation must not undo it.
+    service.ingest(topic(service, "telemetry"), telemetry("OCCUPIED", 0, 0))
+    assert service.metrics(0)["override_violations"] == 1
+    # A long press (resume) hands control back without a false alarm.
+    resume = {**button_on, "correlationId": "b43", "type": "resume", "value": 0}
+    service.ingest(topic(service, "ack"), json.dumps(resume).encode())
+    service.ingest(topic(service, "telemetry"), telemetry("VACANT", 0, 0))
+    assert service.metrics(0)["override_violations"] == 1
+
+
+def test_lux_stored_and_in_history(service):
+    service.ingest(topic(service, "telemetry"), telemetry("OCCUPIED_DAYLIGHT", ambient=900, lux=812.5))
+    assert service.db.latest_telemetry(service.device_id)["lux"] == 812.5
+    assert service.history(5)[0][3] == 812.5
+    assert service.snapshot()["daylight_lux"] == {"on": 500, "off": 300}
+
+
 def test_schedule_fires_when_due(service, clock):
     fake = FakeHubClient(service)
     service.attach_client(fake)

@@ -5,6 +5,7 @@
     python -m presencesense report      energy report from logged data (Markdown)
     python -m presencesense metrics     evaluation metrics as JSON
     python -m presencesense retention   run the 30-day aggregation once
+    python -m presencesense netcheck    test whether this network can reach the broker
 """
 
 import argparse
@@ -14,8 +15,11 @@ import sys
 import time
 from pathlib import Path
 
+from .broker import is_local, random_hub_id
 from .config import Settings, load_dotenv
 from .protocol import TOKEN_MAX
+
+MIN_PUBLIC_HUB_ID = 12
 
 
 def _require_token(settings):
@@ -28,6 +32,20 @@ def _require_token(settings):
         )
     if len(token) > TOKEN_MAX:
         sys.exit(f"PS_API_TOKEN must be at most {TOKEN_MAX} characters (hub buffer limit).")
+
+
+def _require_private_topics(settings):
+    """On a public broker anyone can subscribe to home/hub01/#. A random hub id
+    keeps casual readers and other students' hubs off our topics. (It is not
+    encryption: a subscriber to '#' still sees everything.)"""
+    if is_local(settings):
+        return
+    if settings.hub_id == "hub01" or len(settings.hub_id) < MIN_PUBLIC_HUB_ID:
+        sys.exit(
+            f"PS_HUB_ID={settings.hub_id!r} is too guessable for the public broker "
+            f"{settings.mqtt_host}.\nUse a random one, e.g.\n  PS_HUB_ID={random_hub_id()}\n"
+            "in backend/.env, and the same value as HUB_ID in the firmware's Secrets.h."
+        )
 
 
 def _window(args, now):
@@ -57,6 +75,7 @@ def main(argv=None):
             p.add_argument("--json", action="store_true")
 
     sub.add_parser("retention", help="aggregate data older than the retention window")
+    sub.add_parser("netcheck", help="test whether this network can reach the broker")
 
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
@@ -72,11 +91,17 @@ def main(argv=None):
         from .sim import SimulatedHub
 
         _require_token(settings)
+        _require_private_topics(settings)
         hub = SimulatedHub(settings, scenario=args.scenario, drop_events=args.drop_events)
         if args.rest_port:
             hub.serve_rest(args.rest_port)
         hub.run()
         return
+
+    if args.cmd == "netcheck":
+        from .broker import netcheck
+
+        sys.exit(0 if netcheck(settings) else 1)
 
     from .service import HubService
 
@@ -86,6 +111,7 @@ def main(argv=None):
         from .web import create_app
 
         _require_token(settings)
+        _require_private_topics(settings)
         service.start_mqtt()
         service.start_background()
         app = create_app(service)

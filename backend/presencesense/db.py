@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
     brightness_a     INTEGER NOT NULL,
     brightness_b     INTEGER NOT NULL,
     ambient_raw      INTEGER NOT NULL,
+    lux              REAL,
     distance_cm      REAL,
     fault            INTEGER,
     device_uptime_ms INTEGER NOT NULL,
@@ -38,7 +39,7 @@ CREATE TABLE IF NOT EXISTS commands (
     value          INTEGER,
     label          TEXT,
     source         TEXT NOT NULL,   -- transport: MQTT | REST
-    origin         TEXT NOT NULL,   -- dashboard | schedule | external
+    origin         TEXT NOT NULL,   -- dashboard | schedule | hub (wall button) | external
     sent_at        REAL,
     acked_at       REAL,
     result         TEXT,
@@ -125,6 +126,13 @@ class Database:
         self.path = str(path)
         self._local = threading.local()
         self.conn().executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self):
+        # Databases created before the ESP32 move have no lux column.
+        columns = {r["name"] for r in self.conn().execute("PRAGMA table_info(telemetry)")}
+        if "lux" not in columns:
+            self.conn().execute("ALTER TABLE telemetry ADD COLUMN lux REAL")
 
     def conn(self):
         conn = getattr(self._local, "conn", None)
@@ -187,14 +195,15 @@ class Database:
 
     def insert_telemetry(self, device_id, t, ts):
         self.conn().execute(
-            "INSERT INTO telemetry (device_id, state, brightness_a, brightness_b, ambient_raw,"
-            " distance_cm, fault, device_uptime_ms, server_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO telemetry (device_id, state, brightness_a, brightness_b, ambient_raw, lux,"
+            " distance_cm, fault, device_uptime_ms, server_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 device_id,
                 t["state"],
                 t["lampA"],
                 t["lampB"],
                 t["ambient"],
+                t["lux"],
                 t["distance"],
                 None if t["fault"] is None else int(t["fault"]),
                 t["uptime"],
@@ -209,7 +218,7 @@ class Database:
 
     def telemetry_between(self, device_id, since, until):
         return self._all(
-            "SELECT server_ts, state, brightness_a, brightness_b, ambient_raw, distance_cm"
+            "SELECT server_ts, state, brightness_a, brightness_b, ambient_raw, lux, distance_cm"
             " FROM telemetry WHERE device_id = ? AND server_ts >= ? AND server_ts <= ?"
             " ORDER BY server_ts",
             (device_id, since, until),

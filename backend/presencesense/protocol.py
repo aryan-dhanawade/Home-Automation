@@ -14,6 +14,8 @@ COMMAND_TYPES = ("on", "off", "brightness", "scene", "resume")
 TARGETS = ("lampA", "lampB", "all")
 ACK_RESULTS = ("OK", "AUTH_FAIL", "BAD_REQUEST")
 TRANSPORTS = ("MQTT", "REST")
+# Where a command entered the hub. BUTTON = the hub's own wall switch.
+COMMAND_SOURCES = TRANSPORTS + ("BUTTON",)
 
 # SCENE is a named brightness on the hub; the name only exists on this side.
 SCENES = {"bright": 255, "reading": 180, "movie": 64, "night": 20}
@@ -21,7 +23,12 @@ SCENES = {"bright": 255, "reading": 180, "movie": 64, "night": 20}
 MAX_PAYLOAD_BYTES = 512
 CORRELATION_ID_MAX = 23  # Command.correlationId[24] on the hub
 TOKEN_MAX = 64  # Command.token[65] on the hub
-ADC_MAX = 1023
+ADC_MAX = 4095  # ESP32 12-bit ADC
+LUX_MAX = 200_000
+
+# Daylight inhibit thresholds; must match LUX_DAYLIGHT_ON/OFF in firmware Config.h.
+LUX_DAYLIGHT_ON = 500
+LUX_DAYLIGHT_OFF = 300
 
 
 class PayloadError(ValueError):
@@ -85,6 +92,7 @@ def validate_telemetry(obj):
         "lampA": _int(obj, "lampA", 0, 255),
         "lampB": _int(obj, "lampB", 0, 255),
         "ambient": _int(obj, "ambient", 0, ADC_MAX),
+        "lux": _number(obj, "lux", 0, LUX_MAX),
         "uptime": _uptime(obj),
         "distance": _number(obj, "distance", -1, 1000),
         "fault": fault,
@@ -106,7 +114,25 @@ def validate_ack(obj):
     result = obj.get("result")
     if not isinstance(result, str) or result.upper() not in ACK_RESULTS:
         raise PayloadError(f"unknown result {result!r}")
-    return {"correlationId": cid, "result": result.upper()}
+    ack = {"correlationId": cid, "result": result.upper(), "type": None, "target": None,
+           "value": None, "source": None}
+    # Optional: the hub describes what it executed, so commands the backend did
+    # not send (the wall button, a direct REST call) are still logged and audited.
+    if "type" in obj:
+        if obj["type"] not in COMMAND_TYPES:
+            raise PayloadError(f"unknown ack type {obj['type']!r}")
+        ack["type"] = obj["type"]
+    if "target" in obj:
+        if obj["target"] not in TARGETS:
+            raise PayloadError(f"unknown ack target {obj['target']!r}")
+        ack["target"] = obj["target"]
+    if "value" in obj:
+        ack["value"] = _int(obj, "value", 0, 255)
+    if "source" in obj:
+        if obj["source"] not in COMMAND_SOURCES:
+            raise PayloadError(f"unknown ack source {obj['source']!r}")
+        ack["source"] = obj["source"]
+    return ack
 
 
 def validate_status(payload):
